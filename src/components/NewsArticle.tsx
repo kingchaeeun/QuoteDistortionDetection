@@ -1,4 +1,5 @@
 import { ImageWithFallback } from "./figma/ImageWithFallback";
+import { detectedQuotes, isQuoteDistorted } from "../data/quotesData";
 
 interface NewsArticleProps {
   onQuoteClick: (quoteIndex: number) => void;
@@ -10,12 +11,12 @@ interface NewsArticleProps {
 }
 
 export function NewsArticle({ onQuoteClick, highlightSettings, isPanelOpen }: NewsArticleProps) {
-  // 왜곡 인용문 (1-6번, index 0-5)
-  const isDistorted = (index: number) => index <= 5;
-  
-  // 하이라이트 적용 여부 결정
+  // 하이라이트 적용 여부 결정: 왜곡 점수 기반 판정
   const shouldHighlight = (index: number) => {
-    if (isDistorted(index)) {
+    const quote = detectedQuotes[index];
+    const isDistorted = isQuoteDistorted(quote);
+    
+    if (isDistorted) {
       return highlightSettings.distorted;
     } else {
       return highlightSettings.normal;
