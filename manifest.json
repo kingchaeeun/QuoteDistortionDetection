@@ -1,0 +1,34 @@
+{
+  "manifest_version": 3,
+  "name": "전 채은인데요 뀨><",
+  "version": "0.1.0",
+  "description": "Chrome Extension for news article analysis",
+  "action": {
+    "default_popup": "public/popup.html",
+    "default_icon": {
+      "16": "public/icon128.png",
+      "48": "public/icon128.png",
+      "128": "public/icon128.png"
+    }
+  },
+  "icons": {
+    "16": "public/icon128.png",
+    "48": "public/icon128.png",
+    "128": "public/icon128.png"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://n.news.naver.com/mnews/article/*/*"
+      ],
+      "js": [
+        "content-script.js"
+      ],
+      "run_at": "document_end"
+    }
+  ],
+  "permissions": [],
+  "host_permissions": [
+    "https://n.news.naver.com/mnews/article/*/*"
+  ]
+}

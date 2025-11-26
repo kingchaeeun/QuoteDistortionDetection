@@ -1,0 +1,80 @@
+const fs = require('fs');
+const path = require('path');
+const esbuild = require('esbuild');
+
+const distDir = path.resolve(__dirname, '..', 'dist');
+const manifestSrc = path.resolve(__dirname, '..', 'manifest.json');
+const manifestDest = path.join(distDir, 'manifest.json');
+const publicDir = path.join(distDir, 'public');
+const contentScriptEntry = path.resolve(__dirname, '..', 'src', 'content-script.tsx');
+const contentScriptDest = path.join(distDir, 'content-script.js');
+
+const ensureDir = (dirPath) => {
+  if (!fs.existsSync(dirPath)) {
+    fs.mkdirSync(dirPath, { recursive: true });
+  }
+};
+
+const moveFile = (src, dest, transform) => {
+  if (!fs.existsSync(src)) {
+    console.warn(`Skipping move: ${path.relative(distDir, src)} not found.`);
+    return;
+  }
+
+  ensureDir(path.dirname(dest));
+
+  if (transform) {
+    const contents = fs.readFileSync(src, 'utf-8');
+    fs.writeFileSync(dest, transform(contents));
+  } else {
+    fs.copyFileSync(src, dest);
+  }
+
+  fs.unlinkSync(src);
+  console.log(`Moved ${path.relative(distDir, src)} -> ${path.relative(distDir, dest)}`);
+};
+
+async function bundleContentScript() {
+  await esbuild.build({
+    entryPoints: [contentScriptEntry],
+    bundle: true,
+    outfile: contentScriptDest,
+    format: 'iife',
+    platform: 'browser',
+    target: ['chrome120'],
+    minify: true,
+    jsx: 'automatic',
+    define: {
+      'process.env.NODE_ENV': '"production"',
+    },
+    treeShaking: true,
+  });
+
+  console.log('content-script.js bundled with esbuild');
+}
+
+async function run() {
+  ensureDir(distDir);
+  ensureDir(publicDir);
+
+  fs.copyFileSync(manifestSrc, manifestDest);
+  console.log('manifest.json copied to dist');
+
+  moveFile(
+    path.join(distDir, 'popup.html'),
+    path.join(publicDir, 'popup.html'),
+    (contents) => contents.replace('src="popup.js"', 'src="../popup.js"')
+  );
+
+  moveFile(
+    path.join(distDir, 'icon128.png'),
+    path.join(publicDir, 'icon128.png')
+  );
+
+  await bundleContentScript();
+}
+
+run().catch((error) => {
+  console.error('Post-build step failed:', error);
+  process.exit(1);
+});
