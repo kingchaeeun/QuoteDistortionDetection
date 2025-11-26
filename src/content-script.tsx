@@ -1,4 +1,4 @@
-import { createRoot } from 'react-dom/client';
+﻿import { createRoot } from 'react-dom/client';
 import { useEffect, useState } from 'react';
 import { ExtensionPanel } from './components/ExtensionPanel';
 import { SourceModal } from './components/SourceModal';
@@ -39,11 +39,15 @@ const PANEL_HOST_ID = 'qdd-panel-host';
 const PANEL_ROOT_ID = 'qdd-panel-root';
 const PANEL_STYLE_ID = 'qdd-extension-style';
 const QUOTE_EVENT_NAME = 'qdd:quote-select';
-const QUOTE_REGEX = /[“"][^”"]+[”"]/g;
+const QUOTE_REGEX = /["\'\u201c\u2018][^"\'\u201d\u2019]+["\'\u201d\u2019]/g;
 const DISALLOWED_TAGS = new Set(['SCRIPT', 'STYLE', 'NOSCRIPT', 'CODE', 'PRE']);
 
 const quoteRegistry = new Map<number, HTMLElement>();
 let currentHighlightSettings: HighlightSettings = { distorted: true, normal: false };
+
+function safeTrim(value: unknown): string {
+  return typeof value === 'string' ? value.trim() : '';
+}
 
 void (async function bootstrap() {
   if (!TARGET_URL_PATTERN.test(window.location.href)) {
@@ -74,7 +78,7 @@ void (async function bootstrap() {
       paragraphs: article.paragraphs.length,
     });
 
-    const rawQuotes = wrapDirectQuotes(article.root);
+    const rawQuotes = wrapDirectQuotes(getQuoteTargets(article));
     console.info('[QDD] Direct quotes detected', rawQuotes.length);
 
     const enrichedQuotes = await requestDistortionScores(rawQuotes, article);
@@ -133,10 +137,10 @@ function InjectedApp({ quotes, article }: InjectedAppProps) {
       <div className={`qdd-panel ${isPanelOpen ? 'qdd-panel--open' : 'qdd-panel--closed'}`}>
         <div className="h-full flex flex-col bg-white">
           <div className="px-6 py-3 border-b border-gray-200">
-            <p className="text-xs text-gray-500 uppercase tracking-wide">현재 기사</p>
+            <p className="text-xs text-gray-500 uppercase tracking-wide">?꾩옱 湲곗궗</p>
             <p className="text-sm font-semibold text-gray-800 leading-tight">{article.title}</p>
             {article.reporter && (
-              <p className="text-xs text-gray-500 mt-1">기자: {article.reporter}</p>
+              <p className="text-xs text-gray-500 mt-1">湲곗옄: {article.reporter}</p>
             )}
           </div>
 
@@ -207,12 +211,12 @@ function locateArticle(): ArticleContext {
 
   const paragraphElements = Array.from(root?.querySelectorAll('p') ?? []);
   const paragraphs = paragraphElements
-    .map((paragraph) => paragraph.textContent?.trim() ?? '')
+    .map((paragraph) => safeTrim(paragraph.textContent))
     .filter((content) => content.length > 0);
 
   return {
-    title: title.trim(),
-    reporter: reporter?.trim(),
+    title: safeTrim(title) || document.title,
+    reporter: reporter ? safeTrim(reporter) : undefined,
     paragraphs,
     root: root ?? document.body,
   };
@@ -226,8 +230,9 @@ function findFirstText(
     const element = document.querySelector(selector);
     if (element) {
       const text = getter(element);
-      if (text && text.trim().length > 0) {
-        return text.trim();
+      const cleaned = safeTrim(text);
+      if (cleaned.length > 0) {
+        return cleaned;
       }
     }
   }
@@ -244,22 +249,48 @@ function findFirstElement(selectors: string[]): Element | null {
   return null;
 }
 
-function wrapDirectQuotes(root: HTMLElement): RawQuote[] {
-  const rawQuotes: RawQuote[] = [];
-  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
-  const nodes: Text[] = [];
+function getQuoteTargets(article: ArticleContext): HTMLElement[] {
+  const targets: HTMLElement[] = [];
+  const seen = new Set<HTMLElement>();
 
-  while (walker.nextNode()) {
-    const currentNode = walker.currentNode as Text;
-    if (shouldSkipNode(currentNode)) {
-      continue;
+  const pushIfValid = (element: HTMLElement | null) => {
+    if (element && !seen.has(element)) {
+      seen.add(element);
+      targets.push(element);
     }
-    nodes.push(currentNode);
-  }
+  };
+
+  pushIfValid(article.root);
+
+  const headlineSelectors = ['#title_area', '.media_end_head_headline', '.media_end_head_title', '.media_end_head'];
+  headlineSelectors.forEach((selector) => {
+    const el = document.querySelector(selector);
+    pushIfValid(el as HTMLElement | null);
+  });
+
+  return targets;
+}
+
+function wrapDirectQuotes(targets: HTMLElement[]): RawQuote[] {
+  const rawQuotes: RawQuote[] = [];
+  const nodes: Text[] = [];
+  const seenNodes = new Set<Text>();
+
+  targets.forEach((root) => {
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+    while (walker.nextNode()) {
+      const currentNode = walker.currentNode as Text;
+      if (shouldSkipNode(currentNode) || seenNodes.has(currentNode)) {
+        continue;
+      }
+      seenNodes.add(currentNode);
+      nodes.push(currentNode);
+    }
+  });
 
   nodes.forEach((node) => {
-    const text = node.nodeValue;
-    if (!text) {
+    const text = typeof node.nodeValue === 'string' ? node.nodeValue : '';
+    if (!text.trim()) {
       return;
     }
 
@@ -292,10 +323,12 @@ function wrapDirectQuotes(root: HTMLElement): RawQuote[] {
       fragment.appendChild(span);
       registerQuoteSpan(quoteIndex, span);
 
+      const cleanedQuote = safeTrim((match[1] as string | undefined) ?? raw.replace(/^[\'"\u201c\u2018]|[\'"\u201d\u2019]$/g, ""));
+
       rawQuotes.push({
         id: quoteIndex + 1,
-        text: raw.replace(/^[“"]|[”"]$/g, '').trim(),
-        speaker: '기사 내 화자',
+        text: cleanedQuote,
+        speaker: 'Article quote',
       });
 
       lastIndex = index + raw.length;
@@ -341,24 +374,26 @@ async function requestDistortionScores(
   await new Promise((resolve) => setTimeout(resolve, 100));
 
   return quotes.map((quote, index) => {
-    const mockScore = 45 + ((index * 13) % 50);
-    const mockSource: QuoteSource = {
-      id: index + 1,
-      title: `분석 결과 #${index + 1}`,
-      sourceLink: article.title ? window.location.href : 'https://news.naver.com',
-      originalText: quote.text,
-      distortionScore: mockScore,
-      similarityScore: 60 + ((index * 7) % 35),
-      scores: {
-        semanticReduction: 40 + ((index * 5) % 50),
-        interpretiveExtension: 35 + ((index * 9) % 55),
-        lexicalColoring: mockScore,
-      },
-    };
+    const sources = Array.from({ length: 5 }, (_, sourceIndex) => {
+      const mockScore = 45 + (((index + sourceIndex) * 13) % 50);
+      return {
+        id: index * 5 + sourceIndex + 1,
+        title: `Source candidate ${sourceIndex + 1}`,
+        sourceLink: `https://example.com/source-${index + 1}-${sourceIndex + 1}`,
+        originalText: quote.text,
+        distortionScore: mockScore,
+        similarityScore: 60 + (((index + sourceIndex) * 7) % 35),
+        scores: {
+          semanticReduction: 40 + (((index + sourceIndex) * 5) % 50),
+          interpretiveExtension: 35 + (((index + sourceIndex) * 9) % 55),
+          lexicalColoring: mockScore,
+        },
+      };
+    });
 
     return {
       ...quote,
-      sources: [mockSource],
+      sources,
     };
   });
 }
@@ -379,7 +414,7 @@ function mountPanel(quotes: DetectedQuote[], article: ArticleContext) {
 
   const cssLink = document.createElement('link');
   cssLink.rel = 'stylesheet';
-  cssLink.href = getExtensionAssetUrl('assets/popup.css');
+  cssLink.href = getExtensionAssetUrl('dist/assets/popup.css');
   shadowRoot.appendChild(cssLink);
 
   const localStyles = document.createElement('style');

@@ -3,8 +3,6 @@ const path = require('path');
 const esbuild = require('esbuild');
 
 const distDir = path.resolve(__dirname, '..', 'dist');
-const manifestSrc = path.resolve(__dirname, '..', 'manifest.json');
-const manifestDest = path.join(distDir, 'manifest.json');
 const publicDir = path.join(distDir, 'public');
 const contentScriptEntry = path.resolve(__dirname, '..', 'src', 'content-script.tsx');
 const contentScriptDest = path.join(distDir, 'content-script.js');
@@ -57,9 +55,6 @@ async function run() {
   ensureDir(distDir);
   ensureDir(publicDir);
 
-  fs.copyFileSync(manifestSrc, manifestDest);
-  console.log('manifest.json copied to dist');
-
   moveFile(
     path.join(distDir, 'popup.html'),
     path.join(publicDir, 'popup.html'),
@@ -72,6 +67,12 @@ async function run() {
   );
 
   await bundleContentScript();
+
+  const duplicatedManifest = path.join(distDir, 'manifest.json');
+  if (fs.existsSync(duplicatedManifest)) {
+    fs.unlinkSync(duplicatedManifest);
+    console.log('Removed duplicated dist/manifest.json (manifest stays at project root)');
+  }
 }
 
 run().catch((error) => {
